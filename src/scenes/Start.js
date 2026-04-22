@@ -16,40 +16,44 @@ export default class Start extends Phaser.Scene {
         });
 
         // ================= ANIMATIONS =================
-        this.anims.create({
-            key: "idle",
-            frames: [{ key: "player", frame: 0 }],
-            frameRate: 1,
-            repeat: -1
-        });
+        if (!this.anims.exists("idle")) {
+            this.anims.create({
+                key: "idle",
+                frames: [{ key: "player", frame: 0 }],
+                frameRate: 1,
+                repeat: -1
+            });
+        }
 
-        this.anims.create({
-            key: "idleStretch",
-            frames: [
-                { key: "player", frame: 0 },
-                { key: "player", frame: 1 },
-                { key: "player", frame: 3 },
-                { key: "player", frame: 2 },
-                { key: "player", frame: 0 }
-            ],
-            frameRate: 5,
-            repeat: 0
-        });
+        if (!this.anims.exists("idleStretch")) {
+            this.anims.create({
+                key: "idleStretch",
+                frames: [
+                    { key: "player", frame: 0 },
+                    { key: "player", frame: 1 },
+                    { key: "player", frame: 3 },
+                    { key: "player", frame: 2 },
+                    { key: "player", frame: 0 }
+                ],
+                frameRate: 5,
+                repeat: 0
+            });
+        }
 
         // ================= PLAYER =================
         this.player = this.physics.add.sprite(50, 300, "player", 0);
         this.player.setDisplaySize(40, 60);
         this.player.speed = 200;
         this.player.jumpPower = -300;
-        this.player.coyoteTime = 6;
-        this.player.coyoteTimer = 0;
+        this.player.coyoteTimeMs = 100;
+        this.player.coyoteTimerMs = 0;
+
+        this.player.play("idle");
 
         // idle behavior tracking
         this.playerIdleStart = this.time.now;
         this.nextRandomIdleStretch = this.time.now + Phaser.Math.Between(3000, 7000);
         this.isStretching = false;
-
-        this.player.play("idle");
 
         // ================= SHADOW =================
         this.shadow = this.physics.add.sprite(100, 300, null)
@@ -57,8 +61,10 @@ export default class Start extends Phaser.Scene {
             .setTint(0x555555);
 
         this.shadow.speed = 220;
-        this.shadow.active = false;
         this.shadow.phasing = false;
+
+        // this is the actual "which character am I controlling?" flag
+        this.isShadowActive = false;
 
         // ================= INPUT =================
         this.keys = this.input.keyboard.addKeys({
@@ -71,25 +77,26 @@ export default class Start extends Phaser.Scene {
             e: "E"
         });
 
-        this.input.keyboard.on("keydown-SHIFT", () => {
-            this.shadow.active = !this.shadow.active;
-        });
         this.switchPressedLastFrame = false;
+
+        this.input.keyboard.on("keydown-SHIFT", () => {
+            this.toggleActiveCharacter();
+        });
 
         // ================= WORLD =================
         this.world = [
             { x: 0, y: 350, w: 800, h: 50, kind: "solid" },
             { x: 260, y: 300, w: 100, h: 10, kind: "solid" },
             { x: 150, y: 200, w: 60, h: 150, kind: "shadowWall" },
-            { x: 180, y: 320, w: 20, h: 20, kind: "switch", on: false, cooldown: 0 }
+            { x: 180, y: 320, w: 20, h: 20, kind: "switch", on: false, cooldownMs: 0 }
         ];
 
         this.platforms = this.physics.add.staticGroup();
         this.shadowWalls = this.physics.add.staticGroup();
         this.switches = [];
 
-        for (let obj of this.world) {
-            let rect = this.add.rectangle(obj.x, obj.y, obj.w, obj.h, 0xffffff)
+        for (const obj of this.world) {
+            const rect = this.add.rectangle(obj.x, obj.y, obj.w, obj.h, 0xffffff)
                 .setOrigin(0);
 
             if (obj.kind === "solid") {
@@ -124,7 +131,7 @@ export default class Start extends Phaser.Scene {
             this.physics.add.collider(this.shadow, this.shadowWalls);
 
         // ================= CAMERA =================
-        this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+        this.cameras.main.startFollow(this.player, true, 1, 1);
 
         // ================= ANIMATION COMPLETE =================
         this.player.on("animationcomplete-idleStretch", () => {
@@ -136,43 +143,46 @@ export default class Start extends Phaser.Scene {
         });
     }
 
+    toggleActiveCharacter() {
+        this.isShadowActive = !this.isShadowActive;
+
+        const followTarget = this.isShadowActive ? this.shadow : this.player;
+        this.cameras.main.startFollow(followTarget, true, 1, 1);
+    }
+
     isSwitchOn() {
         return this.switches.some(s => s.on);
     }
 
     tryIdleStretch() {
         if (this.isStretching) return;
-        if (this.shadow.active) return;
+        if (this.isShadowActive) return;
         if (!this.player.body.blocked.down) return;
 
         this.isStretching = true;
         this.player.play("idleStretch");
     }
 
-    update() {
-        let pad = this.input.gamepad.getPad(0);
-        let switchPressed = pad && pad.buttons[3].pressed;
+    update(time, delta) {
+        const pad = this.input.gamepad.getPad(0);
+        const switchPressed = !!(pad && pad.buttons[3].pressed);
 
         if (switchPressed && !this.switchPressedLastFrame) {
-            this.shadow.active = !this.shadow.active;
+            this.toggleActiveCharacter();
         }
         this.switchPressedLastFrame = switchPressed;
 
-        // STOP inactive horizontal movement only
-        if (this.shadow.active) {
-            this.player.setVelocity(0, this.player.body.velocity.y);
+        // STOP inactive character horizontal movement only
+        if (this.isShadowActive) {
+            this.player.setVelocityX(0);
         } else {
-            this.shadow.setVelocity(0, this.shadow.body.velocity.y);
+            this.shadow.setVelocityX(0);
         }
-
-        // ================= CAMERA =================
-        let active = this.shadow.active ? this.shadow : this.player;
-        this.cameras.main.startFollow(active, true, 0.1, 0.1);
 
         // =====================================================
         // PLAYER
         // =====================================================
-        if (!this.shadow.active) {
+        if (!this.isShadowActive) {
             this.player.setVelocityX(0);
 
             let move = 0;
@@ -181,28 +191,29 @@ export default class Start extends Phaser.Scene {
             if (this.keys.d.isDown) move = 1;
 
             if (pad) {
-                let axis = pad.axes[0].getValue();
+                const axis = pad.axes.length > 0 ? pad.axes[0].getValue() : 0;
                 if (Math.abs(axis) > 0.1) move = axis;
             }
 
             this.player.setVelocityX(move * this.player.speed);
 
-            let jumpPressed = this.keys.space.isDown ||
-                              (pad && pad.buttons[0].pressed);
+            const jumpPressed =
+                this.keys.space.isDown ||
+                !!(pad && pad.buttons[0].pressed);
 
             if (this.player.body.blocked.down) {
-                this.player.coyoteTimer = this.player.coyoteTime;
+                this.player.coyoteTimerMs = this.player.coyoteTimeMs;
             } else {
-                this.player.coyoteTimer--;
+                this.player.coyoteTimerMs = Math.max(0, this.player.coyoteTimerMs - delta);
             }
 
-            if (jumpPressed && this.player.coyoteTimer > 0) {
+            if (jumpPressed && this.player.coyoteTimerMs > 0) {
                 this.player.setVelocityY(this.player.jumpPower);
-                this.player.coyoteTimer = 0;
+                this.player.coyoteTimerMs = 0;
             }
 
             // ================= IDLE STRETCH LOGIC =================
-            let isMoving =
+            const isMoving =
                 Math.abs(this.player.body.velocity.x) > 1 ||
                 Math.abs(this.player.body.velocity.y) > 1 ||
                 !this.player.body.blocked.down;
@@ -222,7 +233,7 @@ export default class Start extends Phaser.Scene {
                     this.player.play("idle", true);
                 }
 
-                let idleTime = this.time.now - this.playerIdleStart;
+                const idleTime = this.time.now - this.playerIdleStart;
 
                 if (
                     idleTime >= 10000 ||
@@ -236,7 +247,7 @@ export default class Start extends Phaser.Scene {
         // =====================================================
         // SHADOW
         // =====================================================
-        if (this.shadow.active) {
+        if (this.isShadowActive) {
             this.shadow.setVelocity(0);
 
             let move = 0;
@@ -245,14 +256,15 @@ export default class Start extends Phaser.Scene {
             if (this.keys.d.isDown) move = 1;
 
             if (pad) {
-                let axis = pad.axes[0].getValue();
+                const axis = pad.axes.length > 0 ? pad.axes[0].getValue() : 0;
                 if (Math.abs(axis) > 0.1) move = axis;
             }
 
             this.shadow.setVelocityX(move * this.shadow.speed);
 
-            let phasing = this.keys.s.isDown ||
-                          (pad && pad.buttons[5].pressed);
+            const phasing =
+                this.keys.s.isDown ||
+                !!(pad && pad.buttons[5].pressed);
 
             this.shadow.phasing = phasing;
             this.shadowWallColliderShadow.active = !phasing;
@@ -266,7 +278,7 @@ export default class Start extends Phaser.Scene {
                 if (this.keys.s.isDown) vertical = 1;
 
                 if (pad) {
-                    let axisY = pad.axes[1].getValue();
+                    const axisY = pad.axes.length > 1 ? pad.axes[1].getValue() : 0;
                     if (Math.abs(axisY) > 0.1) vertical = axisY;
                 }
 
@@ -276,29 +288,34 @@ export default class Start extends Phaser.Scene {
             }
 
             // ================= SWITCH =================
-            let interact = this.keys.e.isDown ||
-                           (pad && pad.buttons[2].pressed);
+            const interact =
+                this.keys.e.isDown ||
+                !!(pad && pad.buttons[2].pressed);
 
-            for (let sw of this.switches) {
-                if (Phaser.Geom.Intersects.RectangleToRectangle(
-                    this.shadow.getBounds(),
-                    sw.rect.getBounds()
-                )) {
-                    if (interact && sw.cooldown <= 0) {
+            for (const sw of this.switches) {
+                if (
+                    Phaser.Geom.Intersects.RectangleToRectangle(
+                        this.shadow.getBounds(),
+                        sw.rect.getBounds()
+                    )
+                ) {
+                    if (interact && sw.cooldownMs <= 0) {
                         sw.on = !sw.on;
-                        sw.cooldown = 15;
+                        sw.cooldownMs = 250;
                         sw.rect.setFillStyle(sw.on ? 0x00ff66 : 0xff4444);
                     }
                 }
 
-                if (sw.cooldown > 0) sw.cooldown--;
+                if (sw.cooldownMs > 0) {
+                    sw.cooldownMs = Math.max(0, sw.cooldownMs - delta);
+                }
             }
         }
 
         // ================= SHADOW WALL VISIBILITY =================
-        let on = this.isSwitchOn();
+        const on = this.isSwitchOn();
 
-        this.shadowWalls.children.iterate(wall => {
+        this.shadowWalls.children.iterate((wall) => {
             wall.setVisible(!on);
             wall.body.enable = !on;
         });
