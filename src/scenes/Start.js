@@ -74,7 +74,6 @@ export default class Start extends Phaser.Scene {
         this.input.keyboard.on("keydown-SHIFT", () => {
             this.shadow.active = !this.shadow.active;
         });
-
         this.switchPressedLastFrame = false;
 
         // ================= WORLD =================
