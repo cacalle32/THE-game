@@ -4,190 +4,191 @@ export default class Game extends Phaser.Scene {
     }
 
     preload() {
-        this.load.image("menuBG", "assets/menu_background.png");
-
-        this.load.spritesheet("player", "assets/Bob.png", {
-            frameWidth: 250,
-            frameHeight: 250
-        });
+        // Sprites removed — placeholder rectangles used for now
+        // this.load.spritesheet("bigSlime", "assets/BigSlime.png", { frameWidth: 64, frameHeight: 64 });
+        // this.load.spritesheet("smallSlime", "assets/SmallSlime.png", { frameWidth: 32, frameHeight: 32 });
     }
 
     create() {
         this.levelComplete = false;
-        this.pathOpen = false;
 
-        this.physics.world.gravity.y = 850;
-        this.physics.world.setBounds(0, 0, 2200, 600);
-
-        // ================= BACKGROUND =================
-        // to be reworked with parralax layers
-
-        // ================= TEXT =================
-        this.add.text(40, 25, "LEVEL 1: Slime & Shadow", {
-            fontSize: "28px",
-            color: "#ffffff"
-        });
-
-        this.add.text(40, 60,
-            "A/D move | SPACE jump/double jump | E shoot slime | SHIFT swap | Shadow: hold S to phase",
-            {
-                fontSize: "16px",
-                color: "#dddddd"
-            }
-        );
-
-        // ================= ANIMATIONS =================
-        if (!this.anims.exists("idle")) {
-            this.anims.create({
-                key: "idle",
-                frames: [{ key: "player", frame: 0 }],
-                frameRate: 1,
-                repeat: -1
-            });
-        }
-
-        if (!this.anims.exists("idleStretch")) {
-            this.anims.create({
-                key: "idleStretch",
-                frames: [
-                    { key: "player", frame: 0 },
-                    { key: "player", frame: 1 },
-                    { key: "player", frame: 3 },
-                    { key: "player", frame: 2 },
-                    { key: "player", frame: 0 }
-                ],
-                frameRate: 5,
-                repeat: 0
-            });
-        }
+        // ================= WORLD =================
+        this.physics.world.gravity.y = 900;
+        this.physics.world.setBounds(0, 0, 3200, 650);
 
         // ================= GROUPS =================
-        this.platforms = this.physics.add.staticGroup();
-        this.shadowWalls = this.physics.add.staticGroup();
-        this.slimeBalls = this.physics.add.group();
-        this.buttons = [];
-        this.gates = [];
+        this.platforms   = this.physics.add.staticGroup();
+        this.slimeBalls  = this.physics.add.group();
+        this.breakWalls  = this.physics.add.staticGroup(); // walls big slime can shoot
 
-        // ================= LEVEL GEOMETRY =================
-        this.makeBlock(0, 550, 2200, 50, 0x555555);          // ground
+        // ================= LEVEL =================
+        this.buildLevel();
 
-        this.makeBlock(230, 470, 140, 20, 0x777777);
-        this.makeBlock(470, 410, 140, 20, 0x777777);
-        this.makeBlock(720, 360, 140, 20, 0x777777);          // double jump route
+        // ================= BIG SLIME (Glob) — Player 1: WASD =================
+        this.glob = this.add.rectangle(80, 530, 54, 54, 0x33cc33);
+        this.physics.add.existing(this.glob);
+        this.glob.body.setCollideWorldBounds(true);
+        this.glob.body.setSize(54, 54);
+        this.glob.speed      = 180;
+        this.glob.jumpPower  = -480;
+        this.glob.jumpsUsed  = 0;
+        this.glob.maxJumps   = 1;   // big slime: single jump only
+        this.glob.facing     = 1;
+        this.glob.shootCooldown = 0;
+        this.glob.carrying   = false; // is Pip riding on top?
 
-        this.makeBlock(970, 550, 180, 50, 0x111111);          // fake pit cover / floor
-        this.makeBlock(1200, 460, 170, 20, 0x777777);
-        this.makeBlock(1450, 390, 150, 20, 0x777777);
-
-        // Button wall / gate
-        this.gate = this.makeBlock(880, 420, 50, 130, 0x8844ff);
-        this.gates.push(this.gate);
-
-        // Button that opens the gate
-        this.button = this.makeButton(770, 325, 40, 40);
-
-        // Shadow-only wall section
-        this.makeShadowWall(1580, 360, 180, 190);
-
-        // Final platform and exit
-        this.makeBlock(1820, 470, 160, 20, 0x777777);
-        this.makeBlock(2050, 550, 200, 50, 0x555555);
-        this.exit = this.add.rectangle(2120, 490, 55, 80, 0x00ff99).setOrigin(0.5);
-        this.physics.add.existing(this.exit, true);
-
-        this.add.text(2075, 415, "END", {
-            fontSize: "22px",
-            color: "#00ff99"
-        });
-
-        // ================= PLAYER =================
-        this.player = this.physics.add.sprite(70, 480, "player", 0);
-        this.player.setDisplaySize(42, 60);
-        this.player.setCollideWorldBounds(true);
-        this.player.speed = 230;
-        this.player.jumpPower = -430;
-        this.player.jumpsUsed = 0;
-        this.player.maxJumps = 2;
-        this.player.facing = 1;
-        this.player.play("idle");
-
-        // ================= SHADOW =================
-        this.shadow = this.add.rectangle(120, 480, 34, 54, 0x222222);
-        this.physics.add.existing(this.shadow);
-        this.shadow.body.setCollideWorldBounds(true);
-        this.shadow.body.setSize(34, 54);
-        this.shadow.speed = 250;
-        this.shadow.phasing = false;
-
-        this.isShadowActive = false;
+        // ================= SMALL SLIME (Pip) — Player 2: Arrow keys =================
+        this.pip = this.add.rectangle(150, 530, 28, 28, 0x66ff66);
+        this.physics.add.existing(this.pip);
+        this.pip.body.setCollideWorldBounds(true);
+        this.pip.body.setSize(28, 28);
+        this.pip.speed      = 290;   // faster than Glob
+        this.pip.jumpPower  = -520;
+        this.pip.jumpsUsed  = 0;
+        this.pip.maxJumps   = 2;     // small slime: double jump
+        this.pip.facing     = 1;
+        this.pip.wallClimbing = false;
+        this.pip.onCeiling    = false;
+        this.pip.isCarried    = false;
 
         // ================= INPUT =================
-        this.keys = this.input.keyboard.addKeys({
-            a: "A",
-            d: "D",
-            w: "W",
-            s: "S",
-            space: "SPACE",
-            shift: "SHIFT",
-            e: "E"
+        // Player 1 (Glob): WASD + 1 to shoot
+        this.keysGlob = this.input.keyboard.addKeys({
+            left:  "A",
+            right: "D",
+            up:    "W",
+            shoot: "ONE"    // key "1" to shoot
         });
 
-        this.input.keyboard.on("keydown-SHIFT", () => {
-            this.toggleActiveCharacter();
+        // Player 2 (Pip): Arrow keys
+        this.keysPip = this.input.keyboard.addKeys({
+            left:  "LEFT",
+            right: "RIGHT",
+            up:    "UP",
+            down:  "DOWN"
         });
 
-        this.input.keyboard.on("keydown-E", () => {
-            if (!this.isShadowActive) {
-                this.shootSlimeBall();
-            }
+        // ESC to pause
+        this.input.keyboard.on("keydown-ESC", () => {
+            this.scene.launch("Pause");
+            this.scene.pause("Game");
         });
 
         // ================= COLLISIONS =================
-        this.physics.add.collider(this.player, this.platforms);
-        this.physics.add.collider(this.shadow, this.platforms);
+        this.physics.add.collider(this.glob, this.platforms);
+        this.physics.add.collider(this.pip,  this.platforms);
 
-        this.physics.add.collider(this.slimeBalls, this.platforms);
-
-        this.shadowWallColliderPlayer = this.physics.add.collider(
-            this.player,
-            this.shadowWalls
-        );
-
-        this.shadowWallColliderShadow = this.physics.add.collider(
-            this.shadow,
-            this.shadowWalls
-        );
-
-        this.physics.add.overlap(this.slimeBalls, this.button.rect, (ball) => {
+        // Slimeballs vs platforms
+        this.physics.add.collider(this.slimeBalls, this.platforms, (ball) => {
             ball.destroy();
-            this.openPath();
         });
 
-        this.physics.add.overlap(this.player, this.exit, () => {
-            this.finishLevel();
+        // Slimeballs vs breakable walls
+        this.physics.add.overlap(this.slimeBalls, this.breakWalls, (ball, wall) => {
+            ball.destroy();
+            this.breakWall(wall);
         });
 
-        this.physics.add.overlap(this.shadow, this.exit, () => {
-            this.finishLevel();
+        // Exit overlap — both slimes must reach the exit
+        this.globAtExit = false;
+        this.pipAtExit  = false;
+
+        this.physics.add.overlap(this.glob, this.exit, () => {
+            this.globAtExit = true;
+            this.checkLevelComplete();
+        });
+        this.physics.add.overlap(this.pip, this.exit, () => {
+            this.pipAtExit = true;
+            this.checkLevelComplete();
         });
 
         // ================= CAMERA =================
-        this.cameras.main.setBounds(0, 0, 2200, 600);
-        this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
+        // Camera follows the midpoint between the two slimes
+        this.cameras.main.setBounds(0, 0, 3200, 650);
+        this.camTarget = this.add.rectangle(115, 530, 1, 1, 0x000000, 0);
+        this.physics.add.existing(this.camTarget);
+        this.camTarget.body.allowGravity = false;
+        this.cameras.main.startFollow(this.camTarget, true, 0.08, 0.08);
 
-        // ================= IDLE STRETCH =================
-        this.playerIdleStart = this.time.now;
-        this.nextRandomIdleStretch = this.time.now + Phaser.Math.Between(3000, 7000);
-        this.isStretching = false;
-
-        this.player.on("animationcomplete-idleStretch", () => {
-            this.isStretching = false;
-            this.player.play("idle");
-            this.playerIdleStart = this.time.now;
-            this.nextRandomIdleStretch = this.time.now + Phaser.Math.Between(3000, 7000);
-        });
+        // ================= HUD =================
+        this.hud = this.add.text(16, 16,
+            "GLOB: WASD move | W jump | [1] shoot wall\nPIP:  Arrows move | UP jump (x2) | cling to ceilings\nBoth must reach the exit  |  ESC = pause",
+            { fontSize: "14px", color: "#ddffdd" }
+        ).setScrollFactor(0);
     }
 
+    // ─────────────────────────────────────────────────────────────────
+    //  LEVEL BUILDER
+    // ─────────────────────────────────────────────────────────────────
+    buildLevel() {
+        const G = 0x556655;   // ground/platform colour
+        const B = 0xff5522;   // breakable wall colour
+
+        // Ground sections (gaps at 900-1150 for the carry-jump puzzle,
+        // and at 1700-1750 for the narrow-gap section)
+        this.makeBlock(0,    600, 900,  50, G);   // start ground
+        this.makeBlock(1150, 600, 550,  50, G);   // mid ground
+        this.makeBlock(1800, 600, 1400, 50, G);   // end ground
+
+        // ── Section 1: small steps that only Pip can reach easily ──
+        this.makeBlock(250, 530, 100, 18, G);
+        this.makeBlock(420, 470, 100, 18, G);
+        this.makeBlock(600, 410, 100, 18, G);
+        // Button on the high shelf — Pip runs up and hits it to open gate below
+        this.makeBlock(600, 320, 130, 18, G);
+        this.buttonShelf = this.makeActivationBlock(660, 295, 36, 26, 0xff3333, () => this.openGate());
+        this.add.text(635, 260, "PIP\nSTEP ON", { fontSize: "12px", color: "#ff9999" }).setOrigin(0.5);
+
+        // ── Gate blocking Glob ──
+        this.gate = this.makeBlock(820, 470, 24, 130, 0xaa33ff);
+
+        // ── Section 2: WIDE GAP — Glob must carry Pip ──
+        // Gap runs from x=900 to x=1150 (250px — too wide for either alone)
+        this.add.text(980, 555, "← WIDE GAP →\nGlob carries Pip!", {
+            fontSize: "13px", color: "#ffff88"
+        }).setOrigin(0.5);
+
+        // A low ceiling over the gap so Pip can cling and cross alone
+        // (but Glob is too tall and can't fit — needs to carry Pip over)
+        // hint sign
+        this.add.text(910, 490, "Pip: ride Glob!\nGlob: W to jump", {
+            fontSize: "12px", color: "#aaffaa"
+        });
+
+        // ── Section 3: mid platforms ──
+        this.makeBlock(1200, 540, 160, 18, G);
+        this.makeBlock(1380, 490, 120, 18, G);
+
+        // ── Breakable wall blocking path ──
+        this.makeBreakWall(1540, 430, 30, 170, B);
+        this.add.text(1543, 390, "SHOOT\nWALL", { fontSize: "12px", color: "#ff8866" });
+
+        // ── Section 4: ceiling-cling corridor for Pip ──
+        // A low-roofed tunnel only Pip (28px tall) fits through;
+        // Glob (54px) must go around via upper route
+        this.makeBlock(1700, 480, 200, 16, G);    // floor of tunnel
+        this.makeBlock(1700, 415, 200, 16, G);    // ceiling of tunnel (gap = 65px, Pip=28 fits, Glob=54 doesn't)
+        this.add.text(1750, 440, "PIP\nONLY", { fontSize: "12px", color: "#aaffaa" }).setOrigin(0.5);
+
+        // Upper route for Glob
+        this.makeBlock(1650, 370, 80,  16, G);
+        this.makeBlock(1750, 310, 180, 16, G);
+        this.makeBlock(1960, 370, 80,  16, G);
+
+        // ── Final stretch & exit ──
+        this.makeBlock(2100, 540, 400, 18, G);
+        this.makeBlock(2600, 490, 200, 18, G);
+        this.makeBlock(2850, 430, 200, 18, G);
+
+        // Exit zone
+        this.exit = this.add.rectangle(3100, 555, 60, 90, 0x00ffaa).setOrigin(0.5);
+        this.physics.add.existing(this.exit, true);
+        this.add.text(3100, 495, "EXIT", { fontSize: "20px", color: "#00ffaa" }).setOrigin(0.5);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  HELPERS
+    // ─────────────────────────────────────────────────────────────────
     makeBlock(x, y, w, h, color) {
         const block = this.add.rectangle(x, y, w, h, color).setOrigin(0);
         this.physics.add.existing(block, true);
@@ -195,232 +196,228 @@ export default class Game extends Phaser.Scene {
         return block;
     }
 
-    makeShadowWall(x, y, w, h) {
-        const wall = this.add.rectangle(x, y, w, h, 0x151515).setOrigin(0);
-        wall.setAlpha(0.85);
+    makeBreakWall(x, y, w, h, color) {
+        const wall = this.add.rectangle(x, y, w, h, color).setOrigin(0);
         this.physics.add.existing(wall, true);
-        this.shadowWalls.add(wall);
-
-        this.add.text(x + 10, y + 15, "SHADOW\nPHASE", {
-            fontSize: "16px",
-            color: "#999999"
-        });
-
+        this.breakWalls.add(wall);
         return wall;
     }
 
-    makeButton(x, y, w, h) {
-        const rect = this.add.rectangle(x, y, w, h, 0xff3333).setOrigin(0);
-        this.physics.add.existing(rect, true);
-
-        this.add.text(x - 35, y - 35, "Shoot this", {
-            fontSize: "16px",
-            color: "#ffffff"
-        });
-
-        const button = {
-            rect,
-            on: false
-        };
-
-        this.buttons.push(button);
-        return button;
+    // A pressure-plate style block: when Pip stands on it the callback fires
+    makeActivationBlock(x, y, w, h, color, onActivate) {
+        const block = this.add.rectangle(x, y, w, h, color).setOrigin(0.5);
+        this.physics.add.existing(block, true);
+        this.platforms.add(block);
+        block.activated = false;
+        block.onActivate = onActivate;
+        return block;
     }
 
-    toggleActiveCharacter() {
-        this.isShadowActive = !this.isShadowActive;
-
-        if (this.isShadowActive) {
-            this.cameras.main.startFollow(this.shadow, true, 0.08, 0.08);
-        } else {
-            this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
-        }
-    }
-
-    
-    
-  shootSlimeBall() {
-    const direction = this.player.facing || 1;
-
-    const ball = this.add.circle(
-        this.player.x + direction * 35,
-        this.player.y,
-        11,
-        0x55ff55
-    );
-
-    this.physics.add.existing(ball);
-
-    ball.body.setCircle(11);
-    ball.body.allowGravity = true;
-    ball.body.setVelocity(direction * 520, -130);
-    ball.body.setBounce(0.2);
-
-    this.slimeBalls.add(ball);
-
-    this.time.delayedCall(2200, () => {
-        if (ball && ball.body) {
-            ball.destroy();
-        }
-    });
-}
-
-
-    openPath() {
-        if (this.pathOpen) return;
-
-        this.pathOpen = true;
-        this.button.on = true;
-        this.button.rect.setFillStyle(0x33ff33);
-
-        for (const gate of this.gates) {
-            gate.setVisible(false);
-            gate.body.enable = false;
-        }
-
-        this.add.text(860, 375, "Path opened!", {
-            fontSize: "20px",
-            color: "#33ff33"
+    breakWall(wall) {
+        // Flash then destroy
+        this.tweens.add({
+            targets: wall,
+            alpha: 0,
+            duration: 180,
+            onComplete: () => {
+                this.breakWalls.remove(wall, true, true);
+            }
         });
     }
 
-    finishLevel() {
-        if (this.levelComplete) return;
-
-        this.levelComplete = true;
-
-        // Change "Start" if your menu scene key is named something else.
-        this.scene.start("Start");
+    openGate() {
+        if (this.gateOpen) return;
+        this.gateOpen = true;
+        this.tweens.add({
+            targets: this.gate,
+            alpha: 0,
+            duration: 250,
+            onComplete: () => {
+                this.platforms.remove(this.gate, true, true);
+            }
+        });
+        this.add.text(820, 440, "Gate open!", { fontSize: "15px", color: "#aaffaa" });
     }
 
-    tryIdleStretch() {
-        if (this.isStretching) return;
-        if (this.isShadowActive) return;
-        if (!this.player.body.blocked.down) return;
-
-        this.isStretching = true;
-        this.player.play("idleStretch");
+    checkLevelComplete() {
+        if (this.globAtExit && this.pipAtExit && !this.levelComplete) {
+            this.levelComplete = true;
+            this.time.delayedCall(800, () => this.scene.start("Start"));
+        }
     }
 
-    update(time, delta) {
-        const pad = this.input.gamepad.getPad(0);
+    // ─────────────────────────────────────────────────────────────────
+    //  SHOOTING  (Glob only, straight ahead, no gravity, 1.5s cooldown)
+    // ─────────────────────────────────────────────────────────────────
+    shootSlimeBall() {
+        const now = this.time.now;
+        if (now < this.glob.shootCooldown) return;
+        this.glob.shootCooldown = now + 1500;
 
-        // ================= PLAYER CONTROL =================
-        if (!this.isShadowActive) {
-            this.player.setVelocityX(0);
-            this.shadow.body.setVelocityX(0);
+        const dir = this.glob.facing;
+        const ball = this.add.circle(
+            this.glob.x + dir * 34,
+            this.glob.y,
+            13,
+            0x55ff55
+        );
+        this.physics.add.existing(ball);
+        ball.body.allowGravity = false;
+        ball.body.setCircle(13);
+        ball.body.setVelocityX(dir * 620);
 
-            let move = 0;
+        this.slimeBalls.add(ball);
 
-            if (this.keys.a.isDown) move = -1;
-            if (this.keys.d.isDown) move = 1;
+        // Auto-destroy after 3 s
+        this.time.delayedCall(3000, () => {
+            if (ball && ball.active) ball.destroy();
+        });
+    }
 
-            if (pad) {
-                const axis = pad.axes.length > 0 ? pad.axes[0].getValue() : 0;
-                if (Math.abs(axis) > 0.1) move = axis;
+    // ─────────────────────────────────────────────────────────────────
+    //  UPDATE
+    // ─────────────────────────────────────────────────────────────────
+    update(time) {
+
+        // ── GLOB (Player 1 — WASD) ──────────────────────────────────
+        {
+            const onGround = this.glob.body.blocked.down;
+            if (onGround) this.glob.jumpsUsed = 0;
+
+            let moveX = 0;
+            if (this.keysGlob.left.isDown)  moveX = -1;
+            if (this.keysGlob.right.isDown) moveX =  1;
+            if (moveX !== 0) this.glob.facing = moveX;
+
+            // Glob can't move freely if Pip is riding (carry system)
+            this.glob.body.setVelocityX(moveX * this.glob.speed);
+
+            if (Phaser.Input.Keyboard.JustDown(this.keysGlob.up) &&
+                this.glob.jumpsUsed < this.glob.maxJumps) {
+                this.glob.body.setVelocityY(this.glob.jumpPower);
+                this.glob.jumpsUsed++;
             }
 
-            if (move !== 0) {
-                this.player.facing = move > 0 ? 1 : -1;
+            if (Phaser.Input.Keyboard.JustDown(this.keysGlob.shoot)) {
+                this.shootSlimeBall();
             }
+        }
 
-            this.player.setVelocityX(move * this.player.speed);
+        // ── PIP (Player 2 — Arrow keys) ─────────────────────────────
+        {
+            const onGround  = this.pip.body.blocked.down;
+            const onCeiling = this.pip.body.blocked.up;
+            const onWallL   = this.pip.body.blocked.left;
+            const onWallR   = this.pip.body.blocked.right;
 
-            if (this.player.body.blocked.down) {
-                this.player.jumpsUsed = 0;
-            }
+            if (onGround) this.pip.jumpsUsed = 0;
 
-            const jumpPressed =
-                Phaser.Input.Keyboard.JustDown(this.keys.space) ||
-                !!(pad && pad.buttons[0].pressed);
+            let moveX = 0;
+            if (this.keysPip.left.isDown)  moveX = -1;
+            if (this.keysPip.right.isDown) moveX =  1;
+            if (moveX !== 0) this.pip.facing = moveX;
 
-            if (jumpPressed && this.player.jumpsUsed < this.player.maxJumps) {
-                this.player.setVelocityY(this.player.jumpPower);
-                this.player.jumpsUsed++;
-            }
-
-            const isMoving =
-                Math.abs(this.player.body.velocity.x) > 1 ||
-                Math.abs(this.player.body.velocity.y) > 1 ||
-                !this.player.body.blocked.down;
-
-            if (isMoving) {
-                if (this.isStretching) {
-                    this.player.stop();
-                    this.player.setFrame(0);
-                    this.isStretching = false;
-                }
-
-                this.player.play("idle", true);
-                this.playerIdleStart = this.time.now;
-                this.nextRandomIdleStretch = this.time.now + Phaser.Math.Between(3000, 7000);
+            // ── Ceiling cling ──
+            // If Pip is pressed against the ceiling, gravity is cancelled
+            if (onCeiling) {
+                this.pip.body.allowGravity = false;
+                this.pip.body.setVelocityY(0);
+                this.pip.setFillStyle(0xaaff44); // tint hint
             } else {
-                const idleTime = this.time.now - this.playerIdleStart;
-
-                if (idleTime >= 10000 || this.time.now >= this.nextRandomIdleStretch) {
-                    this.tryIdleStretch();
-                }
-            }
-        }
-
-        // ================= SHADOW CONTROL =================
-        if (this.isShadowActive) {
-            this.player.setVelocityX(0);
-
-            let move = 0;
-            let vertical = 0;
-
-            if (this.keys.a.isDown) move = -1;
-            if (this.keys.d.isDown) move = 1;
-
-            if (pad) {
-                const axisX = pad.axes.length > 0 ? pad.axes[0].getValue() : 0;
-                if (Math.abs(axisX) > 0.1) move = axisX;
+                this.pip.body.allowGravity = true;
+                this.pip.setFillStyle(0x66ff66);
             }
 
-            const phasing =
-                this.keys.s.isDown ||
-                !!(pad && pad.buttons[5].pressed);
-
-            this.shadow.phasing = phasing;
-            this.shadowWallColliderShadow.active = !phasing;
-
-            if (phasing) {
-                this.shadow.body.allowGravity = false;
-
-                if (this.keys.w.isDown) vertical = -1;
-                if (this.keys.s.isDown) vertical = 1;
-
-                if (pad) {
-                    const axisY = pad.axes.length > 1 ? pad.axes[1].getValue() : 0;
-                    if (Math.abs(axisY) > 0.1) vertical = axisY;
-                }
-
-                this.shadow.body.setVelocity(
-                    move * this.shadow.speed,
-                    vertical * this.shadow.speed
+            // ── Wall slide ──
+            if ((onWallL || onWallR) && !onGround && !onCeiling) {
+                this.pip.body.setVelocityY(
+                    Math.min(this.pip.body.velocity.y, 60) // slow slide
                 );
+            }
 
-                this.shadow.setFillStyle(0x666666);
-                this.shadow.setAlpha(0.45);
-            } else {
-                this.shadow.body.allowGravity = true;
-                this.shadow.body.setVelocityX(move * this.shadow.speed);
+            this.pip.body.setVelocityX(moveX * this.pip.speed);
 
-                this.shadow.setFillStyle(0x222222);
-                this.shadow.setAlpha(1);
+            // Jump / wall-jump / ceiling drop
+            if (Phaser.Input.Keyboard.JustDown(this.keysPip.up)) {
+                if (onCeiling) {
+                    // Drop off ceiling
+                    this.pip.body.allowGravity = true;
+                    this.pip.body.setVelocityY(100);
+                } else if (this.pip.jumpsUsed < this.pip.maxJumps) {
+                    this.pip.body.setVelocityY(this.pip.jumpPower);
+                    this.pip.jumpsUsed++;
+                }
+            }
+
+            // ── Carry system ──
+            // If Pip stands on top of Glob, treat Pip as carried:
+            // lock Pip's position to Glob's top and move with it.
+            const pipFeetY  = this.pip.y + 14;
+            const globTopY  = this.glob.y - 27;
+            const horizDiff = Math.abs(this.pip.x - this.glob.x);
+
+            const landingOnGlob =
+                pipFeetY >= globTopY - 6 &&
+                pipFeetY <= globTopY + 10 &&
+                horizDiff < 30 &&
+                this.pip.body.velocity.y >= 0;
+
+            if (landingOnGlob) {
+                this.pip.isCarried = true;
+            }
+
+            if (this.pip.isCarried) {
+                // Pip rides Glob
+                this.pip.body.allowGravity = false;
+                this.pip.body.setVelocity(0, 0);
+                this.pip.setPosition(this.glob.x, this.glob.y - 41);
+
+                // Pip jumps off Glob
+                if (Phaser.Input.Keyboard.JustDown(this.keysPip.up)) {
+                    this.pip.isCarried = false;
+                    this.pip.body.allowGravity = true;
+                    this.pip.body.setVelocityY(this.pip.jumpPower);
+                    this.pip.jumpsUsed = 1;
+                }
+
+                // Pip slides off if player moves away from Glob
+                if (horizDiff > 32) {
+                    this.pip.isCarried = false;
+                    this.pip.body.allowGravity = true;
+                }
             }
         }
 
-        // Safety reset if player falls
-        if (this.player.y > 700) {
-            this.player.setPosition(70, 480);
-            this.player.setVelocity(0, 0);
+        // ── Button shelf check ────────────────────────────────────────
+        if (this.buttonShelf && !this.buttonShelf.activated) {
+            const bx = this.buttonShelf.x;
+            const by = this.buttonShelf.y;
+            if (
+                Math.abs(this.pip.x - bx) < 30 &&
+                Math.abs(this.pip.y - (by - 20)) < 20 &&
+                this.pip.body.blocked.down
+            ) {
+                this.buttonShelf.activated = true;
+                this.buttonShelf.setFillStyle(0x33ff33);
+                this.buttonShelf.onActivate();
+            }
         }
 
-        if (this.shadow.y > 700) {
-            this.shadow.setPosition(120, 480);
-            this.shadow.body.setVelocity(0, 0);
+        // ── Camera midpoint ───────────────────────────────────────────
+        const midX = (this.glob.x + this.pip.x) / 2;
+        const midY = (this.glob.y + this.pip.y) / 2;
+        this.camTarget.setPosition(midX, midY);
+
+        // ── Fall reset ────────────────────────────────────────────────
+        if (this.glob.y > 700) {
+            this.glob.setPosition(80, 530);
+            this.glob.body.setVelocity(0, 0);
+        }
+        if (this.pip.y > 700) {
+            this.pip.setPosition(150, 530);
+            this.pip.body.setVelocity(0, 0);
+            this.pip.isCarried = false;
+            this.pip.body.allowGravity = true;
         }
     }
 }

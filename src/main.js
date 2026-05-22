@@ -1,5 +1,7 @@
 import Start from "./scenes/Start.js";
 import Game from "./scenes/Game.js";
+import GameOver from "./scenes/GameOver.js";
+import Pause from "./scenes/Pause.js";
 const config = {
     type: Phaser.AUTO,
     scale: {
@@ -16,7 +18,7 @@ const config = {
     input: {
     gamepad: true
 },
-    scene: [Start, Game]
+    scene: [Start, Game, GameOver, Pause]
 };
 
 new Phaser.Game(config);
