@@ -17,7 +17,7 @@ export default class Start extends Phaser.Scene {
         ).setOrigin(0.5);
 
         this.input.keyboard.on("keydown-ENTER", () => {
-            this.scene.start("Game");
+            this.scene.start("CharSelect");
         });
 
     }

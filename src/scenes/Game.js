@@ -10,6 +10,7 @@ export default class Game extends Phaser.Scene {
     }
 
     create() {
+        this.activeBalls   = [];
         this.levelComplete = false;
 
         // ================= WORLD =================
@@ -17,58 +18,63 @@ export default class Game extends Phaser.Scene {
         this.physics.world.setBounds(0, 0, 3200, 650);
 
         // ================= GROUPS =================
-        this.platforms   = this.physics.add.staticGroup();
-        this.slimeBalls  = this.physics.add.group();
-        this.breakWalls  = this.physics.add.staticGroup(); // walls big slime can shoot
+        this.platforms  = this.physics.add.staticGroup();
+        this.slimeBalls = this.physics.add.group();
+        this.breakWalls = this.physics.add.staticGroup();
 
         // ================= LEVEL =================
         this.buildLevel();
 
-        // ================= BIG SLIME (Glob) — Player 1: WASD =================
+        // ================= BIG SLIME (Glob) =================
         this.glob = this.add.rectangle(80, 530, 54, 54, 0x33cc33);
         this.physics.add.existing(this.glob);
         this.glob.body.setCollideWorldBounds(true);
         this.glob.body.setSize(54, 54);
-        this.glob.speed      = 180;
-        this.glob.jumpPower  = -480;
-        this.glob.jumpsUsed  = 0;
-        this.glob.maxJumps   = 1;   // big slime: single jump only
-        this.glob.facing     = 1;
+        this.glob.speed         = 180;
+        this.glob.jumpPower     = -480;
+        this.glob.jumpsUsed     = 0;
+        this.glob.maxJumps      = 1;
+        this.glob.facing        = 1;
         this.glob.shootCooldown = 0;
-        this.glob.carrying   = false; // is Pip riding on top?
 
-        // ================= SMALL SLIME (Pip) — Player 2: Arrow keys =================
+        // ================= SMALL SLIME (Pip) =================
         this.pip = this.add.rectangle(150, 530, 28, 28, 0x66ff66);
         this.physics.add.existing(this.pip);
         this.pip.body.setCollideWorldBounds(true);
         this.pip.body.setSize(28, 28);
-        this.pip.speed      = 290;   // faster than Glob
-        this.pip.jumpPower  = -520;
-        this.pip.jumpsUsed  = 0;
-        this.pip.maxJumps   = 2;     // small slime: double jump
-        this.pip.facing     = 1;
-        this.pip.wallClimbing = false;
-        this.pip.onCeiling    = false;
-        this.pip.isCarried    = false;
+        this.pip.speed         = 290;
+        this.pip.jumpPower     = -380;
+        this.pip.jumpsUsed     = 0;
+        this.pip.maxJumps      = 2;
+        this.pip.facing        = 1;
+        this.pip.isCarried     = false;
+        this.pip.isDiving      = false;
+        this.pip.diveTimeLeft  = 10000;
+        this.pip.diveCooldown  = false;
+        this.pip.isCeiling     = false;
+
+        // ================= DIVE BAR =================
+        this.diveBarBg   = this.add.rectangle(0, 0, 60, 7, 0x333333)
+            .setScrollFactor(0).setVisible(false).setDepth(10);
+        this.diveBarFill = this.add.rectangle(0, 0, 60, 7, 0x44aaff)
+            .setScrollFactor(0).setVisible(false).setDepth(11);
 
         // ================= INPUT =================
-        // Player 1 (Glob): WASD + 1 to shoot
-        this.keysGlob = this.input.keyboard.addKeys({
-            left:  "A",
-            right: "D",
-            up:    "W",
-            shoot: "ONE"    // key "1" to shoot
-        });
+        const globControl = this.registry.get("globControl") || "wasd";
+        const pipControl  = this.registry.get("pipControl")  || "arrows";
 
-        // Player 2 (Pip): Arrow keys
-        this.keysPip = this.input.keyboard.addKeys({
-            left:  "LEFT",
-            right: "RIGHT",
-            up:    "UP",
-            down:  "DOWN"
-        });
+        this.keysGlob = this.input.keyboard.addKeys(
+            globControl === "wasd"
+                ? { left: "A", right: "D", up: "W", shoot: "ONE" }
+                : { left: "LEFT", right: "RIGHT", up: "UP", shoot: "ONE" }
+        );
 
-        // ESC to pause
+        this.keysPip = this.input.keyboard.addKeys(
+            pipControl === "wasd"
+                ? { left: "A", right: "D", up: "W", down: "S", dive: "SHIFT" }
+                : { left: "LEFT", right: "RIGHT", up: "UP", down: "DOWN", dive: "SHIFT" }
+        );
+
         this.input.keyboard.on("keydown-ESC", () => {
             this.scene.launch("Pause");
             this.scene.pause("Game");
@@ -76,20 +82,17 @@ export default class Game extends Phaser.Scene {
 
         // ================= COLLISIONS =================
         this.physics.add.collider(this.glob, this.platforms);
-        this.physics.add.collider(this.pip,  this.platforms);
+        this.pipPlatformCollider = this.physics.add.collider(this.pip, this.platforms);
 
-        // Slimeballs vs platforms
         this.physics.add.collider(this.slimeBalls, this.platforms, (ball) => {
             ball.destroy();
         });
 
-        // Slimeballs vs breakable walls
         this.physics.add.overlap(this.slimeBalls, this.breakWalls, (ball, wall) => {
             ball.destroy();
             this.breakWall(wall);
         });
 
-        // Exit overlap — both slimes must reach the exit
         this.globAtExit = false;
         this.pipAtExit  = false;
 
@@ -103,7 +106,6 @@ export default class Game extends Phaser.Scene {
         });
 
         // ================= CAMERA =================
-        // Camera follows the midpoint between the two slimes
         this.cameras.main.setBounds(0, 0, 3200, 650);
         this.camTarget = this.add.rectangle(115, 530, 1, 1, 0x000000, 0);
         this.physics.add.existing(this.camTarget);
@@ -112,7 +114,7 @@ export default class Game extends Phaser.Scene {
 
         // ================= HUD =================
         this.hud = this.add.text(16, 16,
-            "GLOB: WASD move | W jump | [1] shoot wall\nPIP:  Arrows move | UP jump (x2) | cling to ceilings\nBoth must reach the exit  |  ESC = pause",
+            "GLOB: move | jump | [1] shoot\nPIP: move | jump (x2) | SHIFT dive | touch ceiling to cling\nBoth reach exit  |  ESC pause",
             { fontSize: "14px", color: "#ddffdd" }
         ).setScrollFactor(0);
     }
@@ -121,66 +123,47 @@ export default class Game extends Phaser.Scene {
     //  LEVEL BUILDER
     // ─────────────────────────────────────────────────────────────────
     buildLevel() {
-        const G = 0x556655;   // ground/platform colour
-        const B = 0xff5522;   // breakable wall colour
+        const G = 0x556655;
+        const B = 0xff5522;
 
-        // Ground sections (gaps at 900-1150 for the carry-jump puzzle,
-        // and at 1700-1750 for the narrow-gap section)
-        this.makeBlock(0,    600, 900,  50, G);   // start ground
-        this.makeBlock(1150, 600, 550,  50, G);   // mid ground
-        this.makeBlock(1800, 600, 1400, 50, G);   // end ground
+        this.makeBlock(0,    600, 900,  50, G);
+        this.makeBlock(1150, 600, 550,  50, G);
+        this.makeBlock(1800, 600, 1400, 50, G);
 
-        // ── Section 1: small steps that only Pip can reach easily ──
         this.makeBlock(250, 530, 100, 18, G);
         this.makeBlock(420, 470, 100, 18, G);
         this.makeBlock(600, 410, 100, 18, G);
-        // Button on the high shelf — Pip runs up and hits it to open gate below
         this.makeBlock(600, 320, 130, 18, G);
         this.buttonShelf = this.makeActivationBlock(660, 295, 36, 26, 0xff3333, () => this.openGate());
         this.add.text(635, 260, "PIP\nSTEP ON", { fontSize: "12px", color: "#ff9999" }).setOrigin(0.5);
 
-        // ── Gate blocking Glob ──
         this.gate = this.makeBlock(820, 470, 24, 130, 0xaa33ff);
 
-        // ── Section 2: WIDE GAP — Glob must carry Pip ──
-        // Gap runs from x=900 to x=1150 (250px — too wide for either alone)
         this.add.text(980, 555, "← WIDE GAP →\nGlob carries Pip!", {
             fontSize: "13px", color: "#ffff88"
         }).setOrigin(0.5);
-
-        // A low ceiling over the gap so Pip can cling and cross alone
-        // (but Glob is too tall and can't fit — needs to carry Pip over)
-        // hint sign
-        this.add.text(910, 490, "Pip: ride Glob!\nGlob: W to jump", {
+        this.add.text(910, 490, "Pip: ride Glob!\nGlob: jump across", {
             fontSize: "12px", color: "#aaffaa"
         });
 
-        // ── Section 3: mid platforms ──
         this.makeBlock(1200, 540, 160, 18, G);
         this.makeBlock(1380, 490, 120, 18, G);
 
-        // ── Breakable wall blocking path ──
         this.makeBreakWall(1540, 430, 30, 170, B);
         this.add.text(1543, 390, "SHOOT\nWALL", { fontSize: "12px", color: "#ff8866" });
 
-        // ── Section 4: ceiling-cling corridor for Pip ──
-        // A low-roofed tunnel only Pip (28px tall) fits through;
-        // Glob (54px) must go around via upper route
-        this.makeBlock(1700, 480, 200, 16, G);    // floor of tunnel
-        this.makeBlock(1700, 415, 200, 16, G);    // ceiling of tunnel (gap = 65px, Pip=28 fits, Glob=54 doesn't)
+        this.makeBlock(1700, 480, 200, 16, G);
+        this.makeBlock(1700, 415, 200, 16, G);
         this.add.text(1750, 440, "PIP\nONLY", { fontSize: "12px", color: "#aaffaa" }).setOrigin(0.5);
 
-        // Upper route for Glob
         this.makeBlock(1650, 370, 80,  16, G);
         this.makeBlock(1750, 310, 180, 16, G);
         this.makeBlock(1960, 370, 80,  16, G);
 
-        // ── Final stretch & exit ──
         this.makeBlock(2100, 540, 400, 18, G);
         this.makeBlock(2600, 490, 200, 18, G);
         this.makeBlock(2850, 430, 200, 18, G);
 
-        // Exit zone
         this.exit = this.add.rectangle(3100, 555, 60, 90, 0x00ffaa).setOrigin(0.5);
         this.physics.add.existing(this.exit, true);
         this.add.text(3100, 495, "EXIT", { fontSize: "20px", color: "#00ffaa" }).setOrigin(0.5);
@@ -203,25 +186,21 @@ export default class Game extends Phaser.Scene {
         return wall;
     }
 
-    // A pressure-plate style block: when Pip stands on it the callback fires
     makeActivationBlock(x, y, w, h, color, onActivate) {
         const block = this.add.rectangle(x, y, w, h, color).setOrigin(0.5);
         this.physics.add.existing(block, true);
         this.platforms.add(block);
-        block.activated = false;
+        block.activated  = false;
         block.onActivate = onActivate;
         return block;
     }
 
     breakWall(wall) {
-        // Flash then destroy
         this.tweens.add({
             targets: wall,
             alpha: 0,
             duration: 180,
-            onComplete: () => {
-                this.breakWalls.remove(wall, true, true);
-            }
+            onComplete: () => { this.breakWalls.remove(wall, true, true); }
         });
     }
 
@@ -232,9 +211,7 @@ export default class Game extends Phaser.Scene {
             targets: this.gate,
             alpha: 0,
             duration: 250,
-            onComplete: () => {
-                this.platforms.remove(this.gate, true, true);
-            }
+            onComplete: () => { this.platforms.remove(this.gate, true, true); }
         });
         this.add.text(820, 440, "Gate open!", { fontSize: "15px", color: "#aaffaa" });
     }
@@ -247,39 +224,24 @@ export default class Game extends Phaser.Scene {
     }
 
     // ─────────────────────────────────────────────────────────────────
-    //  SHOOTING  (Glob only, straight ahead, no gravity, 1.5s cooldown)
+    //  SHOOTING
     // ─────────────────────────────────────────────────────────────────
     shootSlimeBall() {
         const now = this.time.now;
         if (now < this.glob.shootCooldown) return;
         this.glob.shootCooldown = now + 1500;
 
-        const dir = this.glob.facing;
-        const ball = this.add.circle(
-            this.glob.x + dir * 34,
-            this.glob.y,
-            13,
-            0x55ff55
-        );
-        this.physics.add.existing(ball);
-        ball.body.allowGravity = false;
-        ball.body.setCircle(13);
-        ball.body.setVelocityX(dir * 620);
-
-        this.slimeBalls.add(ball);
-
-        // Auto-destroy after 3 s
-        this.time.delayedCall(3000, () => {
-            if (ball && ball.active) ball.destroy();
-        });
+        const dir  = this.glob.facing;
+        const ball = this.add.circle(this.glob.x + dir * 40, this.glob.y - 20, 13, 0x55ff55);
+        this.activeBalls.push({ obj: ball, dir });
     }
 
     // ─────────────────────────────────────────────────────────────────
     //  UPDATE
     // ─────────────────────────────────────────────────────────────────
-    update(time) {
+    update(time, delta) {
 
-        // ── GLOB (Player 1 — WASD) ──────────────────────────────────
+        // ── GLOB ─────────────────────────────────────────────────────
         {
             const onGround = this.glob.body.blocked.down;
             if (onGround) this.glob.jumpsUsed = 0;
@@ -289,13 +251,12 @@ export default class Game extends Phaser.Scene {
             if (this.keysGlob.right.isDown) moveX =  1;
             if (moveX !== 0) this.glob.facing = moveX;
 
-            // Glob can't move freely if Pip is riding (carry system)
             this.glob.body.setVelocityX(moveX * this.glob.speed);
 
             if (Phaser.Input.Keyboard.JustDown(this.keysGlob.up) &&
-                this.glob.jumpsUsed < this.glob.maxJumps) {
+                this.glob.jumpsUsed < 1 && onGround) {
                 this.glob.body.setVelocityY(this.glob.jumpPower);
-                this.glob.jumpsUsed++;
+                this.glob.jumpsUsed = 1;
             }
 
             if (Phaser.Input.Keyboard.JustDown(this.keysGlob.shoot)) {
@@ -303,76 +264,16 @@ export default class Game extends Phaser.Scene {
             }
         }
 
-        // ── PIP (Player 2 — Arrow keys) ─────────────────────────────
+        // ── PIP ──────────────────────────────────────────────────────
         {
-            const onGround  = this.pip.body.blocked.down;
-            const onCeiling = this.pip.body.blocked.up;
-            const onWallL   = this.pip.body.blocked.left;
-            const onWallR   = this.pip.body.blocked.right;
-
-            if (onGround) this.pip.jumpsUsed = 0;
-
-            let moveX = 0;
-            if (this.keysPip.left.isDown)  moveX = -1;
-            if (this.keysPip.right.isDown) moveX =  1;
-            if (moveX !== 0) this.pip.facing = moveX;
-
-            // ── Ceiling cling ──
-            // If Pip is pressed against the ceiling, gravity is cancelled
-            if (onCeiling) {
-                this.pip.body.allowGravity = false;
-                this.pip.body.setVelocityY(0);
-                this.pip.setFillStyle(0xaaff44); // tint hint
-            } else {
-                this.pip.body.allowGravity = true;
-                this.pip.setFillStyle(0x66ff66);
-            }
-
-            // ── Wall slide ──
-            if ((onWallL || onWallR) && !onGround && !onCeiling) {
-                this.pip.body.setVelocityY(
-                    Math.min(this.pip.body.velocity.y, 60) // slow slide
-                );
-            }
-
-            this.pip.body.setVelocityX(moveX * this.pip.speed);
-
-            // Jump / wall-jump / ceiling drop
-            if (Phaser.Input.Keyboard.JustDown(this.keysPip.up)) {
-                if (onCeiling) {
-                    // Drop off ceiling
-                    this.pip.body.allowGravity = true;
-                    this.pip.body.setVelocityY(100);
-                } else if (this.pip.jumpsUsed < this.pip.maxJumps) {
-                    this.pip.body.setVelocityY(this.pip.jumpPower);
-                    this.pip.jumpsUsed++;
-                }
-            }
-
-            // ── Carry system ──
-            // If Pip stands on top of Glob, treat Pip as carried:
-            // lock Pip's position to Glob's top and move with it.
-            const pipFeetY  = this.pip.y + 14;
-            const globTopY  = this.glob.y - 27;
-            const horizDiff = Math.abs(this.pip.x - this.glob.x);
-
-            const landingOnGlob =
-                pipFeetY >= globTopY - 6 &&
-                pipFeetY <= globTopY + 10 &&
-                horizDiff < 30 &&
-                this.pip.body.velocity.y >= 0;
-
-            if (landingOnGlob) {
-                this.pip.isCarried = true;
-            }
-
+            // ── Carried — most logic locked out ──────────────────────
             if (this.pip.isCarried) {
-                // Pip rides Glob
                 this.pip.body.allowGravity = false;
                 this.pip.body.setVelocity(0, 0);
                 this.pip.setPosition(this.glob.x, this.glob.y - 41);
+                this.pip.setFillStyle(0x66ff66);
+                this.pip.setDisplaySize(28, 28);
 
-                // Pip jumps off Glob
                 if (Phaser.Input.Keyboard.JustDown(this.keysPip.up)) {
                     this.pip.isCarried = false;
                     this.pip.body.allowGravity = true;
@@ -380,10 +281,155 @@ export default class Game extends Phaser.Scene {
                     this.pip.jumpsUsed = 1;
                 }
 
-                // Pip slides off if player moves away from Glob
-                if (horizDiff > 32) {
-                    this.pip.isCarried = false;
+                this.diveBarBg.setVisible(false);
+                this.diveBarFill.setVisible(false);
+
+            } else {
+
+                const onGround  = this.pip.body.blocked.down;
+                const onCeiling = this.pip.body.blocked.up;
+                const onWallL   = this.pip.body.blocked.left;
+                const onWallR   = this.pip.body.blocked.right;
+
+                if (onGround) {
+                    this.pip.jumpsUsed = 0;
+                    this.pip.isCeiling = false;
+                    if (this.pip.isDiving) {
+                        this.pip.isDiving = false;
+                        this.pip.body.allowGravity = true;
+                        this.pip.body.setSize(28, 28);
+                        this.pip.setDisplaySize(28, 28);
+                    }
+                }
+
+                let moveX = 0;
+                if (this.keysPip.left.isDown)  moveX = -1;
+                if (this.keysPip.right.isDown) moveX =  1;
+                if (moveX !== 0) this.pip.facing = moveX;
+
+                // ── FLOOR DIVE (Shift) ────────────────────────────────
+                const divePressed = this.keysPip.dive.isDown;
+
+                if (divePressed && !this.pip.diveCooldown && !this.pip.isDiving) {
+                    this.pip.isDiving     = true;
+                    this.pip.diveTimeLeft = 10000;
+                    this.pip.body.setSize(28, 12);
+                    this.pip.setDisplaySize(28, 12);
+                    this.pip.body.allowGravity = false;
+                }
+
+                if (this.pip.isDiving) {
+                    if (divePressed && this.pip.diveTimeLeft > 0) {
+                        this.pip.diveTimeLeft -= delta;
+
+                        this.pip.body.setVelocityX(moveX * this.pip.speed * 1.4);
+
+                        // auto climb any wall encountered
+                        if (onWallL || onWallR) {
+                            this.pip.body.setVelocityY(-this.pip.speed * 0.8);
+                        } else {
+                            this.pip.body.setVelocityY(0);
+                        }
+
+                        this.pip.setFillStyle(0x66ff66);
+                        this.pip.setDisplaySize(28, 12);
+
+                        // ── dive bar ──
+                        const fraction = Math.max(0, this.pip.diveTimeLeft / 10000);
+                        const barWidth = 60;
+                        const filled   = barWidth * fraction;
+                        const sx = this.pip.x - this.cameras.main.scrollX;
+                        const sy = this.pip.y - this.cameras.main.scrollY - 24;
+
+                        this.diveBarBg.setPosition(sx, sy).setVisible(true);
+                        this.diveBarFill
+                            .setPosition(sx - (barWidth - filled) / 2, sy)
+                            .setDisplaySize(Math.max(0, filled), 7)
+                            .setVisible(true);
+
+                        const r = Math.floor(187 * (1 - fraction));
+                        const g = Math.floor(170 * fraction);
+                        const b = Math.floor(255 * fraction);
+                        this.diveBarFill.setFillStyle(
+                            Phaser.Display.Color.GetColor(68 + r, g, b)
+                        );
+
+                    } else {
+                        // time ran out or key released
+                        this.pip.isDiving = false;
+                        this.pip.body.allowGravity = true;
+                        this.pip.body.setSize(28, 28);
+                        this.pip.setDisplaySize(28, 28);
+                        this.pip.diveTimeLeft = 0;
+                        this.pip.diveCooldown = true;
+                        this.time.delayedCall(1500, () => {
+                            this.pip.diveCooldown = false;
+                            this.pip.diveTimeLeft = 10000;
+                        });
+                        this.diveBarBg.setVisible(false);
+                        this.diveBarFill.setVisible(false);
+                    }
+
+                } else {
+                    // ── not diving ────────────────────────────────────
+                    this.diveBarBg.setVisible(false);
+                    this.diveBarFill.setVisible(false);
+
+                    // ── CEILING CLING ─────────────────────────────────
+                    if (onCeiling && !this.pip.isCeiling) {
+                        this.pip.isCeiling = true;
+                    }
+
+                    if (this.pip.isCeiling && onCeiling) {
+                        this.pip.body.allowGravity = false;
+                        this.pip.body.setVelocityY(0);
+                        this.pip.setFillStyle(0xaaff44);
+
+                        if (Phaser.Input.Keyboard.JustDown(this.keysPip.up)) {
+                            this.pip.isCeiling = false;
+                            this.pip.body.allowGravity = true;
+                            this.pip.body.setVelocityY(120);
+                        }
+                    } else if (!onCeiling) {
+                        this.pip.isCeiling = false;
+                        this.pip.body.allowGravity = true;
+                        this.pip.setFillStyle(0x66ff66);
+                    }
+
+                    // ── WALL SLIDE ────────────────────────────────────
+                    if ((onWallL || onWallR) && !onGround && !this.pip.isCeiling) {
+                        this.pip.body.setVelocityY(Math.min(this.pip.body.velocity.y, 60));
+                    }
+
+                    this.pip.body.setVelocityX(moveX * this.pip.speed);
+
+                    // ── JUMP ──────────────────────────────────────────
+                    if (Phaser.Input.Keyboard.JustDown(this.keysPip.up) && !this.pip.isCeiling) {
+                        if (this.pip.jumpsUsed < this.pip.maxJumps) {
+                            this.pip.body.setVelocityY(this.pip.jumpPower);
+                            this.pip.jumpsUsed++;
+                        }
+                    }
+                }
+
+                // ── CARRY — check if Pip lands on Glob ───────────────
+                const pipFeetY  = this.pip.y + 14;
+                const globTopY  = this.glob.y - 27;
+                const horizDiff = Math.abs(this.pip.x - this.glob.x);
+
+                const landingOnGlob =
+                    pipFeetY >= globTopY - 6 &&
+                    pipFeetY <= globTopY + 10 &&
+                    horizDiff < 30 &&
+                    this.pip.body.velocity.y >= 0 &&
+                    !this.pip.isDiving;
+
+                if (landingOnGlob) {
+                    this.pip.isCarried = true;
+                    this.pip.isDiving  = false;
                     this.pip.body.allowGravity = true;
+                    this.pip.body.setSize(28, 28);
+                    this.pip.setDisplaySize(28, 28);
                 }
             }
         }
@@ -417,7 +463,24 @@ export default class Game extends Phaser.Scene {
             this.pip.setPosition(150, 530);
             this.pip.body.setVelocity(0, 0);
             this.pip.isCarried = false;
+            this.pip.isDiving  = false;
+            this.pip.isCeiling = false;
+            this.pip.body.setSize(28, 28);
+            this.pip.setDisplaySize(28, 28);
             this.pip.body.allowGravity = true;
+            this.pipPlatformCollider.active = true;
+            this.diveBarBg.setVisible(false);
+            this.diveBarFill.setVisible(false);
+        }
+
+        // ── Balls ─────────────────────────────────────────────────────
+        for (let i = this.activeBalls.length - 1; i >= 0; i--) {
+            const b = this.activeBalls[i];
+            b.obj.x += b.dir * (600 * delta / 1000);
+            if (b.obj.x < 0 || b.obj.x > 3200) {
+                b.obj.destroy();
+                this.activeBalls.splice(i, 1);
+            }
         }
     }
 }
